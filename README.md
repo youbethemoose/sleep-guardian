@@ -1,8 +1,12 @@
 # Sleep Guardian
 
+> **Keep your Mac awake automatically when you leave home. Let it sleep normally when you're back.**
+
 A [SwiftBar](https://swiftbar.app) menu bar plugin for macOS that automatically manages your Mac's sleep behavior based on whether you're home or away — using your **router's MAC address** as a silent, reliable location signal.
 
 No GPS. No location services. No cloud. Just your local network.
+
+**Solves:** Mac sleeping mid-upload, Dropbox pausing, long jobs dying, displays going dark on location — all without touching System Settings every time you leave the house.
 
 ---
 
