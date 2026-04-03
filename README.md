@@ -1,22 +1,32 @@
-# Sleep Guardian
+# Sleep Guardian 📷
 
-> **Keep your Mac awake automatically when you leave home. Let it sleep normally when you're back.**
+> **A photographer's dream menu bar app. Awake on set. Asleep at home. Zero effort.**
 
 A [SwiftBar](https://swiftbar.app) menu bar plugin for macOS that automatically manages your Mac's sleep behavior based on whether you're home or away — using your **router's MAC address** as a silent, reliable location signal.
 
 No GPS. No location services. No cloud. Just your local network.
 
-**Solves:** Mac sleeping mid-upload, Dropbox pausing, long jobs dying, displays going dark on location — all without touching System Settings every time you leave the house.
+**Solves:** Mac sleeping mid-upload, Dropbox pausing, tethered shooting software going dark, long culling sessions interrupted — all without touching System Settings every time you leave the house.
+
+---
+
+## Built for photographers (and anyone who lives away from their desk)
+
+If you shoot on location, you know the drill: you get to set, open your laptop, and at some point your Mac decides it's done — display goes dark mid-tether, Dropbox stalls, Lightroom loses its place. So you start mashing keys and digging through System Settings to turn sleep off. Then you get home, forget to turn it back on, and your battery drains overnight.
+
+Sleep Guardian fixes this permanently. The moment you leave your home network, your Mac **stays fully awake** — no intervention needed. The menu bar icon switches to a 📷 camera to remind you you're in on-set mode. The moment you get home, the 📷 disappears, the 🏠 appears, and your Mac goes back to sleeping normally.
+
+It just works, in the background, every day.
 
 ---
 
 ## What It Does
 
-### Away from home
-The moment you leave your home network, Sleep Guardian **automatically blocks all sleep** — display and system — so your Mac keeps running for on-location shoots, remote work sessions, uploads, or anything that needs to stay alive.
+### Away from home — 📷 on set
+The moment you leave your home network, Sleep Guardian **automatically blocks all sleep** — display and system — so your Mac stays alive for tethered shooting, on-set culling, cloud uploads, or anything that needs to keep running.
 
-### At home
-When you're home, Sleep Guardian steps back and **lets your Mac sleep normally**. You're in control. If you need to keep it awake for a Dropbox sync, a long render, or anything else, you can start a manual session from the menu bar.
+### At home — 🏠 normal sleep
+When you're home, Sleep Guardian steps back and **lets your Mac sleep normally**. No wasted battery, no manual toggling. If you need to keep it awake for a Dropbox sync, a long export, or a render, you can start a timed session from the menu.
 
 ---
 
@@ -50,7 +60,9 @@ It will return something like `34:98:b5:d4:1b:37`. That's your home router's MAC
 |------|---------|
 | 🏠 | Home — Mac sleeps normally |
 | ☕ | Timed or indefinite stay-awake session active |
-| 📷 | Away from home — full sleep block active automatically |
+| 📷 | Away from home — you're on set, full sleep block active automatically |
+
+The 📷 icon is intentional. When you see a camera in your menu bar, you know your Mac is locked awake and ready for anything on location.
 
 ---
 
