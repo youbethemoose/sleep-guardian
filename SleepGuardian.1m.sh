@@ -17,7 +17,7 @@
 #  To find it: arp -n 192.168.1.1 | awk '{print $4}'
 # ════════════════════════════════════════════════
 HOME_ROUTER_MACS=(
-    "xx:xx:xx:xx:xx:xx"  # ← replace with your router's MAC
+    "xx:xx:xx:xx:xx:xx"  # ← replace with your router's MAC, or use the menu's setup button
 )
 
 # ════════════════════════════════════════════════
@@ -53,14 +53,31 @@ get_router_mac() {
     normalize_mac "$(arp -n "$gateway" 2>/dev/null | awk '/:.+:.+:/{print $4}' | head -1)"
 }
 
-is_home_network() {
-    local mac home
-    mac=$(get_router_mac)
-    [ -z "$mac" ] && return 1
+is_home_mac() {
+    local home
     for home in "${HOME_ROUTER_MACS[@]}"; do
-        [ "$mac" = "$(normalize_mac "$home")" ] && return 0
+        [ "$1" = "$(normalize_mac "$home")" ] && return 0
     done
     return 1
+}
+
+is_home_network() {
+    local mac
+    mac=$(get_router_mac)
+    [ -n "$mac" ] && is_home_mac "$mac"
+}
+
+# True once at least one real MAC (not the xx:xx placeholder) is configured.
+is_configured() {
+    local home
+    for home in "${HOME_ROUTER_MACS[@]}"; do
+        echo "$home" | grep -qiE '^([0-9a-f]{1,2}:){5}[0-9a-f]{1,2}$' && return 0
+    done
+    return 1
+}
+
+notify() {
+    osascript -e "display notification \"$1\" with title \"Sleep Guardian\"" 2>/dev/null
 }
 
 read_session() {
@@ -163,6 +180,26 @@ action_stop() {
     kill_caffeinate
 }
 
+# Writes the current router's MAC into HOME_ROUTER_MACS at the top of this
+# file, replacing the placeholder on first setup.
+action_set_home() {
+    local mac
+    mac=$(get_router_mac)
+    if [ -z "$mac" ]; then
+        notify "No network found — connect to your home Wi-Fi or ethernet first."
+        return
+    fi
+    if is_home_mac "$mac"; then
+        notify "This network is already set as home."
+        return
+    fi
+    sed -i '' '/"xx:xx:xx:xx:xx:xx"/d' "$SCRIPT_PATH"
+    sed -i '' "/^HOME_ROUTER_MACS=(/a\\
+    \"$mac\"
+" "$SCRIPT_PATH"
+    notify "This network is now set as home."
+}
+
 # ── Handle SwiftBar menu clicks ──────────────────
 case "$1" in
     start-away)       action_start_away;               exit 0 ;;
@@ -173,6 +210,7 @@ case "$1" in
     start-8h)         action_start_timed 480 "8 hrs";  exit 0 ;;
     start-indefinite) action_start_indefinite;         exit 0 ;;
     stop)             action_stop;                     exit 0 ;;
+    set-home)         action_set_home;                 exit 0 ;;
 esac
 
 # ── Startup delay — wait for network on fresh login ─
@@ -185,6 +223,26 @@ UPTIME=$(( NOW - UPTIME_SECS ))
 if [ "$UPTIME" -lt 90 ]; then
     WAIT=$(( 90 - UPTIME ))
     sleep "$WAIT"
+fi
+
+# ── First-run setup ──────────────────────────────
+# No home network configured yet: don't manage sleep, just walk through setup.
+if ! is_configured; then
+    CURRENT_MAC=$(get_router_mac)
+    echo ":gearshape:"
+    echo "---"
+    echo "Sleep Guardian needs setup | sfimage=exclamationmark.triangle.fill color=#f59e0b"
+    echo "While connected to your home network, click below. | color=#6b7280 size=12"
+    echo "---"
+    if [ -n "$CURRENT_MAC" ]; then
+        echo "Use this network as home | sfimage=house bash=\"$SCRIPT_PATH\" param1=set-home terminal=false refresh=true"
+        echo "Router: $CURRENT_MAC | color=#6b7280 size=12"
+    else
+        echo "No network detected — connect to Wi-Fi or ethernet | sfimage=wifi.slash color=#6b7280"
+    fi
+    echo "---"
+    echo "Refresh | sfimage=arrow.clockwise refresh=true"
+    exit 0
 fi
 
 # ── Main logic ───────────────────────────────────
@@ -305,6 +363,11 @@ echo "Indefinite | sfimage=infinity bash=\"$SCRIPT_PATH\" param1=start-indefinit
 
 echo "---"
 echo "Force Away mode | sfimage=film bash=\"$SCRIPT_PATH\" param1=start-away terminal=false refresh=true"
+
+if ! $AT_HOME; then
+    echo "Settings | sfimage=gearshape"
+    echo "--Add this network as home (new router?) | sfimage=house bash=\"$SCRIPT_PATH\" param1=set-home terminal=false refresh=true"
+fi
 
 echo "---"
 echo "Refresh | sfimage=arrow.clockwise refresh=true"

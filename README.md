@@ -75,6 +75,7 @@ Icons are native Apple SF Symbols (outline style), so they match the rest of you
 | House | Home — Mac sleeps normally |
 | Coffee cup | Timed or indefinite stay-awake session active |
 | Camera | Away from home — you're on set, full sleep block active automatically |
+| Gear | Setup needed — no home network saved yet |
 
 The camera icon is intentional. When you see a camera in your menu bar, you know your Mac is locked awake and ready for anything on location.
 
@@ -131,10 +132,24 @@ If you close the lid and want your Mac to keep running (e.g., clamshell mode wit
    ```bash
    chmod +x ~/path/to/SleepGuardian.1m.sh
    ```
-4. Find your router's MAC address (see above) and paste it into the `HOME_ROUTER_MACS` list at the top of the file
-5. Refresh SwiftBar
+4. Refresh SwiftBar. A **gear** icon appears in your menu bar — that means setup is needed.
+5. **While you're at home**, click the gear → **Use this network as home**. Sleep Guardian saves your router's MAC address into the script for you. (You can also paste it in by hand — see above.)
 
 The `1m` in the filename tells SwiftBar to re-run the script every **1 minute**, which is how the auto-detection stays current.
+
+Until a home network is set, Sleep Guardian doesn't touch your Mac's sleep at all.
+
+### Check your setup
+
+Run through this once after installing:
+
+1. **At home, the icon is a house** and the dropdown says **Home network detected**. If you see a camera instead, your home network isn't saved — click **Settings → Add this network as home** in the dropdown.
+2. **Start a 30-minute session.** The icon turns into a coffee cup and the dropdown shows a green **Confirmed by macOS**. That means macOS itself reports sleep is blocked. Click **End Session** afterwards.
+3. **Test leaving home.** Turn Wi-Fi off (and unplug ethernet). Within about 2 minutes the icon turns into a **camera**, the dropdown says **Away session active**, and **Confirmed by macOS** is green. Turn Wi-Fi back on and within a minute it returns to the house.
+
+If all three pass, you're done. If the dropdown ever shows a red warning instead of **Confirmed by macOS**, click **Refresh**.
+
+**New router?** The house will turn into a camera at home. Click **Settings → Add this network as home** and you're set again.
 
 ---
 
