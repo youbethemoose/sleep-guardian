@@ -38,7 +38,9 @@ A **MAC address** (Media Access Control address) is a unique hardware identifier
 - **Is unique worldwide** — no two routers share the same MAC address
 - **Never leaves your local network** — it's only visible to devices physically connected to your router
 
-Sleep Guardian checks the MAC address of your default gateway (your router) every minute. If it matches the one you configured, you're home. If it doesn't — or if there's no match at all — you're away.
+Sleep Guardian checks the MAC address of your default gateway (your router) every minute. If it matches one you configured, you're home. If it doesn't — or if there's no match at all — you're away.
+
+Leaving home takes two missed checks in a row (about a minute), so a brief Wi-Fi blip at home doesn't cancel a running session.
 
 This is more reliable than checking SSIDs (Wi-Fi network names can be spoofed or duplicated), doesn't require internet access, and works on both Wi-Fi and ethernet.
 
@@ -50,19 +52,37 @@ Open Terminal and run:
 arp -n $(route -n get default | awk '/gateway:/{print $2}') | awk '/:.+:.+:/{print $4}'
 ```
 
-It will return something like `xx:xx:xx:xx:xx:xx`. That's your home router's MAC address. Paste it into the `HOME_ROUTER_MAC` line at the top of the script.
+It will return something like `a1:b2:c3:d4:e5:f6`. That's your home router's MAC address. Paste it into the `HOME_ROUTER_MACS` list at the top of the script:
+
+```bash
+HOME_ROUTER_MACS=(
+    "a1:b2:c3:d4:e5:f6"
+)
+```
+
+Got a new router? Add its MAC as another line — you can keep the old one too. You can also add a second location (like a studio) that you want treated as "home".
+
+> **Keep your MAC address out of public repos.** Router MACs can sometimes be matched to a physical location through public Wi-Fi databases.
 
 ---
 
 ## Menu Bar Modes
 
+Icons are native Apple SF Symbols (outline style), so they match the rest of your menu bar and adapt to light and dark mode.
+
 | Icon | Meaning |
 |------|---------|
-| 🏠 | Home — Mac sleeps normally |
-| ☕ | Timed or indefinite stay-awake session active |
-| 📷 | Away from home — you're on set, full sleep block active automatically |
+| House | Home — Mac sleeps normally |
+| Coffee cup | Timed or indefinite stay-awake session active |
+| Camera | Away from home — you're on set, full sleep block active automatically |
 
-The 📷 icon is intentional. When you see a camera in your menu bar, you know your Mac is locked awake and ready for anything on location.
+The camera icon is intentional. When you see a camera in your menu bar, you know your Mac is locked awake and ready for anything on location.
+
+If you leave home while a timed or indefinite session is running, Sleep Guardian replaces it with Away mode, so your display stays on at the shoot.
+
+### Confirmed by macOS
+
+While a session is running, the dropdown asks macOS directly (via `pmset`) whether sleep is really blocked and shows a green **Confirmed by macOS** check, or a red warning if not. It also lists any other apps that are currently keeping your Mac awake.
 
 ---
 
@@ -72,7 +92,7 @@ The 📷 icon is intentional. When you see a camera in your menu bar, you know y
 |---------|---------------|
 | 30 min / 1h / 2h / 4h / 8h | System sleep only — display still sleeps |
 | Indefinite | System sleep only — display still sleeps |
-| Force Away mode | Display **and** system sleep — identical to auto-away behavior |
+| Force Away mode | Display **and** system sleep — identical to auto-away behavior. Works at home too; stays on until you end it |
 
 For timed/indefinite sessions, `caffeinate -i -s -m` is used:
 - `-i` — prevent idle sleep
@@ -111,7 +131,7 @@ If you close the lid and want your Mac to keep running (e.g., clamshell mode wit
    ```bash
    chmod +x ~/path/to/SleepGuardian.1m.sh
    ```
-4. Find your router's MAC address (see above) and paste it into the `HOME_ROUTER_MAC` line at the top of the file
+4. Find your router's MAC address (see above) and paste it into the `HOME_ROUTER_MACS` list at the top of the file
 5. Refresh SwiftBar
 
 The `1m` in the filename tells SwiftBar to re-run the script every **1 minute**, which is how the auto-detection stays current.
@@ -124,8 +144,9 @@ The `1m` in the filename tells SwiftBar to re-run the script every **1 minute**,
 |------|---------|
 | `~/.sleep-guardian-session` | Stores current session type and end time |
 | `~/.sleep-guardian-caff.pid` | Stores the PID of the caffeinate process so it can be cleanly killed |
+| `~/.sleep-guardian-location` | Remembers whether you were last home or away, to detect arriving and leaving |
 
-Both files are cleaned up automatically when a session ends.
+The session and PID files are cleaned up automatically when a session ends. Before stopping a process, Sleep Guardian checks that it really is its own `caffeinate`, so a stale PID file after a reboot can never kill something else.
 
 ---
 
@@ -133,4 +154,4 @@ Both files are cleaned up automatically when a session ends.
 
 - macOS (any recent version)
 - [SwiftBar](https://swiftbar.app)
-- No external dependencies — uses only built-in macOS tools (`caffeinate`, `arp`, `route`)
+- No external dependencies — uses only built-in macOS tools (`caffeinate`, `arp`, `route`, `pmset`)

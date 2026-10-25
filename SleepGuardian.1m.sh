@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # <bitbar.title>Sleep Guardian</bitbar.title>
-# <bitbar.version>3.0</bitbar.version>
+# <bitbar.version>3.1</bitbar.version>
 # <bitbar.author>Robby Mueller</bitbar.author>
 # <bitbar.desc>Auto keep-awake based on home network. Timed sessions when home.</bitbar.desc>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
@@ -11,28 +11,38 @@
 # <swiftbar.hideSwiftBar>false</swiftbar.hideSwiftBar>
 
 # ════════════════════════════════════════════════
-#  CONFIGURE THIS — your home router's MAC address
-#  This is burned into your physical router hardware.
-#  It never changes and is unique in the world.
+#  CONFIGURE THIS — your home router MAC addresses
+#  One per line inside the parentheses. Add a new one
+#  when you swap routers (or keep the old one too).
 #  To find it: arp -n 192.168.1.1 | awk '{print $4}'
 # ════════════════════════════════════════════════
-HOME_ROUTER_MAC="xx:xx:xx:xx:xx:xx"
+HOME_ROUTER_MACS=(
+    "xx:xx:xx:xx:xx:xx"  # ← replace with your router's MAC
+)
 
 # ════════════════════════════════════════════════
 #  Internal — do not edit below this line
 # ════════════════════════════════════════════════
-SESSION_FILE="/Users/robbymueller/.sleep-guardian-session"
-CAFFEINATE_PID_FILE="/Users/robbymueller/.sleep-guardian-caff.pid"
+SESSION_FILE="$HOME/.sleep-guardian-session"
+CAFFEINATE_PID_FILE="$HOME/.sleep-guardian-caff.pid"
+LOCATION_FILE="$HOME/.sleep-guardian-location"
 SCRIPT_PATH="$0"
 
 # ── Helpers ─────────────────────────────────────
+
+# Lowercases and zero-pads each octet, since arp sometimes
+# prints "8:3:..." instead of "08:03:...".
+normalize_mac() {
+    echo "$1" | tr 'A-F' 'a-f' | awk -F: '{
+        for (i = 1; i <= NF; i++) { o = $i; if (length(o) == 1) o = "0" o; printf "%s%s", (i > 1 ? ":" : ""), o }
+    }'
+}
 
 # Gets the MAC address of the default gateway (your router),
 # works on WiFi and ethernet, needs no special permissions.
 # We ping first to ensure the ARP table is populated,
 # then read from it — all local, no internet required.
 get_router_mac() {
-    # Find the default gateway IP across any interface
     local gateway
     gateway=$(route -n get default 2>/dev/null | awk '/gateway:/{print $2}')
     [ -z "$gateway" ] && echo "" && return
@@ -40,14 +50,16 @@ get_router_mac() {
     # Ping once silently to populate ARP cache (instant, local only)
     ping -c 1 -W 1 "$gateway" &>/dev/null
 
-    # Read MAC from ARP table
-    arp -n "$gateway" 2>/dev/null | awk '/:.+:.+:/{print $4}' | head -1
+    normalize_mac "$(arp -n "$gateway" 2>/dev/null | awk '/:.+:.+:/{print $4}' | head -1)"
 }
 
 is_home_network() {
-    local mac
+    local mac home
     mac=$(get_router_mac)
-    [ "$mac" = "$HOME_ROUTER_MAC" ] && return 0
+    [ -z "$mac" ] && return 1
+    for home in "${HOME_ROUTER_MACS[@]}"; do
+        [ "$mac" = "$(normalize_mac "$home")" ] && return 0
+    done
     return 1
 }
 
@@ -55,13 +67,20 @@ read_session() {
     [ -f "$SESSION_FILE" ] && cat "$SESSION_FILE" || echo ""
 }
 
+# Returns the PID from the pid file only if it's still our caffeinate.
+# Guards against killing an unrelated process that reused the PID after a reboot.
+caffeinate_pid() {
+    [ -f "$CAFFEINATE_PID_FILE" ] || return 1
+    local pid
+    pid=$(cat "$CAFFEINATE_PID_FILE")
+    [ "$(ps -p "$pid" -o comm= 2>/dev/null)" = "caffeinate" ] || return 1
+    echo "$pid"
+}
+
 kill_caffeinate() {
-    if [ -f "$CAFFEINATE_PID_FILE" ]; then
-        local pid
-        pid=$(cat "$CAFFEINATE_PID_FILE")
-        kill "$pid" 2>/dev/null
-        rm -f "$CAFFEINATE_PID_FILE"
-    fi
+    local pid
+    pid=$(caffeinate_pid) && kill "$pid" 2>/dev/null
+    rm -f "$CAFFEINATE_PID_FILE"
 }
 
 start_caffeinate() {
@@ -95,6 +114,29 @@ format_remaining() {
     h=$(( secs / 3600 ))
     m=$(( (secs % 3600) / 60 ))
     [ "$h" -gt 0 ] && printf "%dh %02dm" "$h" "$m" || printf "%dm" "$m"
+}
+
+# Asks macOS which sleep assertions our caffeinate actually holds.
+verified_status() {
+    local pid assertions display=false system=false
+    pid=$(caffeinate_pid) || { echo "none"; return; }
+    assertions=$(pmset -g assertions 2>/dev/null | grep "pid $pid(caffeinate)")
+    echo "$assertions" | grep -q "PreventUserIdleDisplaySleep" && display=true
+    echo "$assertions" | grep -qE "PreventUserIdleSystemSleep|PreventSystemSleep" && system=true
+    if $display && $system; then echo "full"
+    elif $system; then echo "system"
+    else echo "none"
+    fi
+}
+
+# Other apps currently holding a keep-awake assertion (excluding macOS itself and us).
+other_blockers() {
+    pmset -g assertions 2>/dev/null \
+        | grep "pid [0-9]*(" \
+        | grep -E "PreventUserIdle(Display|System)Sleep|NoIdleSleepAssertion|NoDisplaySleepAssertion|PreventSystemSleep" \
+        | grep -vE "\((powerd|caffeinate|WindowServer|coreaudiod)\)" \
+        | sed -E 's/.*pid [0-9]+\(([^)]+)\).*/\1/' \
+        | sort -u | paste -sd ',' - | sed 's/,/, /g'
 }
 
 # ── Actions ─────────────────────────────────────
@@ -158,15 +200,27 @@ if [ "$SESSION_TYPE" = "timed" ] && session_expired "$SESSION"; then
     SESSION_TYPE=""
 fi
 
-# Check if caffeinate is still alive
-CAFF_RUNNING=false
-if [ -f "$CAFFEINATE_PID_FILE" ]; then
-    pid=$(cat "$CAFFEINATE_PID_FILE")
-    kill -0 "$pid" 2>/dev/null && CAFF_RUNNING=true
-fi
+caffeinate_pid >/dev/null && CAFF_RUNNING=true || CAFF_RUNNING=false
 
-# Detect home vs away (the reliable way)
-is_home_network && AT_HOME=true || AT_HOME=false
+# Detect home vs away. Leaving home needs two misses in a row (~1 min),
+# so a brief Wi-Fi blip at home doesn't cancel a running session.
+PREV_LOCATION=$(cat "$LOCATION_FILE" 2>/dev/null)
+if is_home_network; then
+    LOCATION="home"
+elif [ "$PREV_LOCATION" = "home" ]; then
+    LOCATION="leaving"
+else
+    LOCATION="away"
+fi
+echo "$LOCATION" > "$LOCATION_FILE"
+[ "$LOCATION" = "away" ] && AT_HOME=false || AT_HOME=true
+
+# Just left home: whatever home session was running gets replaced by
+# Away mode, so the display stays on at the studio / on set.
+if ! $AT_HOME && [ "$PREV_LOCATION" = "leaving" ] && [ "$SESSION_TYPE" != "away" ]; then
+    action_start_away
+    SESSION_TYPE="away"
+fi
 
 # Auto-start full block when away and no session running
 if ! $AT_HOME && [ -z "$SESSION_TYPE" ]; then
@@ -174,8 +228,9 @@ if ! $AT_HOME && [ -z "$SESSION_TYPE" ]; then
     SESSION_TYPE="away"
 fi
 
-# Auto-end away session the moment you get home
-if $AT_HOME && [ "$SESSION_TYPE" = "away" ]; then
+# Just got home: end the automatic away session. Only on arrival, so
+# "Force Away mode" still works when you start it at home.
+if $AT_HOME && [ "$PREV_LOCATION" = "away" ] && [ "$SESSION_TYPE" = "away" ]; then
     action_stop
     SESSION_TYPE=""
 fi
@@ -183,61 +238,73 @@ fi
 # Revive caffeinate if it died unexpectedly
 if [ -n "$SESSION_TYPE" ] && ! $CAFF_RUNNING; then
     [ "$SESSION_TYPE" = "away" ] && start_caffeinate "full" || start_caffeinate "system"
+    sleep 0.3  # give macOS a moment to register the assertion before we verify it
 fi
 
-# ── Menubar title (emoji only) ───────────────────
-if [ "$SESSION_TYPE" = "away" ]; then
-    echo "📷"
-elif [ "$SESSION_TYPE" = "timed" ]; then
-    echo "☕"
-elif [ "$SESSION_TYPE" = "indefinite" ]; then
-    echo "☕"
-else
-    $AT_HOME && echo "🏠" || echo "📷"
-fi
+# ── Menubar title (SF Symbols) ───────────────────
+case "$SESSION_TYPE" in
+    away)             echo ":camera:" ;;
+    timed|indefinite) echo ":cup.and.saucer:" ;;
+    *)                $AT_HOME && echo ":house:" || echo ":camera:" ;;
+esac
 
 echo "---"
 
 # ── Dropdown ─────────────────────────────────────
 
-$AT_HOME && echo "📍 Home network detected" || echo "📍 Away from home"
+$AT_HOME && echo "Home network detected | sfimage=location.fill" \
+         || echo "Away from home | sfimage=location.fill"
 
 if [ "$SESSION_TYPE" = "away" ]; then
-    echo "⚡ Away session active"
-    echo "   Display + system sleep: BLOCKED | color=#fbbf24"
+    echo "Away session active | sfimage=bolt.fill"
+    echo "Display + system sleep: BLOCKED | color=#fbbf24"
 elif [ "$SESSION_TYPE" = "timed" ]; then
-    echo "⏱ Timed session — $(format_remaining "$SESSION_ENDS") remaining"
-    echo "   System sleep: BLOCKED  /  Display: sleeps normally | color=#fbbf24"
+    echo "Timed session — $(format_remaining "$SESSION_ENDS") remaining | sfimage=timer"
+    echo "System sleep: BLOCKED  /  Display: sleeps normally | color=#fbbf24"
 elif [ "$SESSION_TYPE" = "indefinite" ]; then
-    echo "∞ Indefinite session active"
-    echo "   System sleep: BLOCKED  /  Display: sleeps normally | color=#fbbf24"
+    echo "Indefinite session active | sfimage=infinity"
+    echo "System sleep: BLOCKED  /  Display: sleeps normally | color=#fbbf24"
 else
-    echo "💤 No session — Mac sleeps normally | color=#6b7280"
+    echo "No session — Mac sleeps normally | sfimage=moon.zzz color=#6b7280"
 fi
+
+# Confirm with macOS that the block is really in place
+if [ -n "$SESSION_TYPE" ]; then
+    EXPECTED="system"; [ "$SESSION_TYPE" = "away" ] && EXPECTED="full"
+    VERIFIED=$(verified_status)
+    if [ "$VERIFIED" = "$EXPECTED" ]; then
+        echo "Confirmed by macOS | sfimage=checkmark.seal.fill color=#22c55e"
+    else
+        echo "macOS isn't reporting the block — try Refresh | sfimage=exclamationmark.triangle.fill color=#ef4444"
+    fi
+fi
+
+OTHERS=$(other_blockers)
+[ -n "$OTHERS" ] && echo "Also keeping Mac awake: $OTHERS | sfimage=info.circle color=#6b7280 size=12"
 
 echo "---"
 
 if [ -n "$SESSION_TYPE" ]; then
-    echo "⏹ End Session | bash=$SCRIPT_PATH param1=stop terminal=false refresh=true"
+    echo "End Session | sfimage=stop.circle bash=\"$SCRIPT_PATH\" param1=stop terminal=false refresh=true"
     echo "---"
 fi
 
 if $AT_HOME; then
     echo "START TIMED SESSION"
-    echo "   System stays awake, display still sleeps | color=#6b7280"
+    echo "System stays awake, display still sleeps | color=#6b7280 size=12"
 else
     echo "MANUAL OVERRIDE"
 fi
 
-echo "⏱ 30 minutes   | bash=$SCRIPT_PATH param1=start-30m terminal=false refresh=true"
-echo "⏱ 1 hour       | bash=$SCRIPT_PATH param1=start-1h  terminal=false refresh=true"
-echo "⏱ 2 hours      | bash=$SCRIPT_PATH param1=start-2h  terminal=false refresh=true"
-echo "⏱ 4 hours      | bash=$SCRIPT_PATH param1=start-4h  terminal=false refresh=true"
-echo "⏱ 8 hours      | bash=$SCRIPT_PATH param1=start-8h  terminal=false refresh=true"
-echo "∞ Indefinite    | bash=$SCRIPT_PATH param1=start-indefinite terminal=false refresh=true"
+echo "30 minutes | sfimage=timer bash=\"$SCRIPT_PATH\" param1=start-30m terminal=false refresh=true"
+echo "1 hour | sfimage=timer bash=\"$SCRIPT_PATH\" param1=start-1h terminal=false refresh=true"
+echo "2 hours | sfimage=timer bash=\"$SCRIPT_PATH\" param1=start-2h terminal=false refresh=true"
+echo "4 hours | sfimage=timer bash=\"$SCRIPT_PATH\" param1=start-4h terminal=false refresh=true"
+echo "8 hours | sfimage=timer bash=\"$SCRIPT_PATH\" param1=start-8h terminal=false refresh=true"
+echo "Indefinite | sfimage=infinity bash=\"$SCRIPT_PATH\" param1=start-indefinite terminal=false refresh=true"
 
 echo "---"
-echo "🎬 Force Away mode | bash=$SCRIPT_PATH param1=start-away terminal=false refresh=true"
+echo "Force Away mode | sfimage=film bash=\"$SCRIPT_PATH\" param1=start-away terminal=false refresh=true"
 
 echo "---"
-echo "🔄 Refresh | refresh=true"
+echo "Refresh | sfimage=arrow.clockwise refresh=true"
